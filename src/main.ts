@@ -1,21 +1,42 @@
 import { NestFactory } from '@nestjs/core';
-
-import * as helmet from 'helmet';
+import serverlessExpress from '@vendia/serverless-express';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Callback, Context, Handler } from 'aws-lambda';
 
 import { AppModule } from './app.module';
 
-const port = process.env.PORT || 4000;
+let server: Handler;
+const LOCAL_SERVER_URL = 'http://localhost:4000/dev';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+async function bootstrap(): Promise<Handler> {
+  const app = await NestFactory.create(AppModule, { cors: true });
 
-  app.enableCors({
-    origin: (req, callback) => callback(null, true),
-  });
-  app.use(helmet());
+  const config = new DocumentBuilder()
+    .setTitle('CloudX Databases')
+    .setDescription('The CloudX databases api documentation')
+    .setVersion('1.0')
+    .addServer(LOCAL_SERVER_URL)
+    .addServer(process.env.DEV_SERVER_URL)
+    .build();
 
-  await app.listen(port);
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('swagger', app, document);
+
+  await app.init();
+
+  const expressApp = app.getHttpAdapter().getInstance();
+
+  // app.use(helmet());
+
+  return serverlessExpress({ app: expressApp });
 }
-bootstrap().then(() => {
-  console.log('App is running on %s port', port);
-});
+
+export const handler: Handler = async (
+event: any,
+context: Context,
+callback: Callback,
+) => {
+  server = server ?? (await bootstrap());
+
+  return server(event, context, callback);
+};
